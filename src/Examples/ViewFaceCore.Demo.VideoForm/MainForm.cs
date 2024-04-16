@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
+using ViewFaceCore.Configs;
 using ViewFaceCore.Core;
 using ViewFaceCore.Demo.VideoForm.Extensions;
 using ViewFaceCore.Demo.VideoForm.Models;
@@ -35,6 +36,8 @@ namespace ViewFaceCore.Demo.VideoForm
         private CancellationTokenSource token = null;
 
         private ViewFaceFactory faceFactory = null;
+
+        private FaceAntiSpoofing faceAntiSpoofing = null;
 
         public MainForm()
         {
@@ -233,6 +236,11 @@ namespace ViewFaceCore.Demo.VideoForm
                 {
                     faceFactory = new ViewFaceFactory(width, height);
                 }
+                if (faceAntiSpoofing == null)
+                {
+                    //var config = new FaceAntiSpoofingConfig();
+                    faceAntiSpoofing = new FaceAntiSpoofing();
+                }
                 FilterInfo info = videoDevices[comboBox1.SelectedIndex];
                 VideoCaptureDevice videoCapture = new VideoCaptureDevice(info.MonikerString);
                 var videoResolution = videoCapture.VideoCapabilities.Where(p => p.FrameSize.Width == width && p.FrameSize.Height == height).FirstOrDefault();
@@ -353,7 +361,7 @@ namespace ViewFaceCore.Demo.VideoForm
             isDetecting = true;
             try
             {
-                while (VideoPlayer.IsRunning && !token.IsCancellationRequested)
+                while (!token.IsCancellationRequested && VideoPlayer.IsRunning)
                 {
                     try
                     {
@@ -376,18 +384,43 @@ namespace ViewFaceCore.Demo.VideoForm
                             FormHelper.SetPictureBoxImage(FacePictureBox, bitmap);
                             continue;
                         }
+
+                        var huotiReslut = "";
+                        var huotiColor = Brushes.Green;
                         List<Models.FaceInfo> faceInfos = new List<Models.FaceInfo>();
                         using (FaceImage faceImage = bitmap.ToFaceImage())
                         {
                             var infos = await faceFactory.Get<FaceTracker>().TrackAsync(faceImage);
+
+                            if (cb_huoti.Checked && infos.Any())
+                            {
+                                var info = infos.First().ToFaceInfo();
+                                var points = await faceFactory.Get<FaceLandmarker>().MarkAsync(faceImage, info);
+                                var result = await faceAntiSpoofing.AntiSpoofingVideoAsync(bitmap, info, points);
+                                huotiReslut = $"活体检测，结果：{result.Status}，清晰度:{result.Clarity}，真实度：{result.Reality}";
+                                if (result.Status == AntiSpoofingStatus.Spoof)
+                                {
+                                    huotiColor = Brushes.Red;
+                                }
+                                else if (result.Status == AntiSpoofingStatus.Real)
+                                {
+                                    huotiColor = Brushes.Green;
+                                }
+                                else
+                                {
+                                    huotiColor = Brushes.Blue;
+                                }
+
+                            }
+
                             for (int i = 0; i < infos.Length; i++)
                             {
-
                                 Models.FaceInfo faceInfo = new Models.FaceInfo
                                 {
                                     Pid = infos[i].Pid,
                                     Location = infos[i].Location
                                 };
+
                                 if (CheckBoxFaceMask.Checked || CheckBoxFaceProperty.Checked)
                                 {
                                     Model.FaceInfo info = infos[i].ToFaceInfo();
@@ -435,6 +468,7 @@ namespace ViewFaceCore.Demo.VideoForm
                                         }
                                     }
                                 }
+
                                 faceInfos.Add(faceInfo);
                             }
                         }
@@ -473,10 +507,12 @@ namespace ViewFaceCore.Demo.VideoForm
                                             builder.Append($"{faceInfos[i].GenderDescribe}");
                                             builder.Append(" | ");
                                         }
+
                                         g.DrawString(builder.ToString(), new Font("微软雅黑", 24), Brushes.Green, new PointF(faceInfos[i].Location.X + faceInfos[i].Location.Width + 24, faceInfos[i].Location.Y));
                                     }
                                 }
                             }
+
                             if (CheckBoxFPS.Checked)
                             {
                                 stopwatch.Stop();
@@ -496,6 +532,10 @@ namespace ViewFaceCore.Demo.VideoForm
                                     fps = 1000f / stopwatch.ElapsedMilliseconds;
                                 }
                                 g.DrawString($"{fps:#.#} FPS", new Font("微软雅黑", 24), Brushes.Green, new Point(10, 10));
+                            }
+                            if (cb_huoti.Checked)
+                            {
+                                g.DrawString(huotiReslut, new Font("微软雅黑", 24), huotiColor, new Point(10, 55));
                             }
                         }
                         FormHelper.SetPictureBoxImage(FacePictureBox, bitmap);
