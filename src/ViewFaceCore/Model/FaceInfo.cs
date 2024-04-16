@@ -29,7 +29,7 @@ namespace ViewFaceCore.Model
         public FaceRect Location
         {
             get { return pos; }
-            internal set { pos = value; }
+            set { pos = value; }
         }
 
         #region IFormattable
